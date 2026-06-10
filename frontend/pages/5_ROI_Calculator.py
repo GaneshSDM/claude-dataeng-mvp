@@ -1,11 +1,11 @@
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from api import get  # noqa: F401  (keeps sys.path side-effect for core imports)
+from api import get  # noqa: F401
 from core.metrics import roi, PROGRAM_COST_YEAR1, PROGRAM_COST_ONGOING
 
 st.set_page_config(page_title="ROI Calculator", page_icon="📈", layout="wide")
-st.title("📈 ROI Calculator")
+st.title("📈 ROI Calculator — Multi-Agent Data Engineering")
 st.caption("Illustrative model. Every assumption is a slider — bring your own numbers.")
 
 c1, c2 = st.columns([1, 2])
