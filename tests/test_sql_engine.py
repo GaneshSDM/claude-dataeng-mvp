@@ -79,6 +79,18 @@ class TestAnalyzeSQL:
         findings = analyze_sql("SELECT * FROM orders WHERE quantity > 0")
         assert any(f["rule"] == "no_filter_on_id" for f in findings)
 
+    def test_non_sargable_detected(self):
+        findings = analyze_sql("SELECT * FROM orders WHERE DATE_TRUNC('month', order_date) = '2024-01-01'")
+        assert any(f["rule"] == "non_sargable" for f in findings)
+
+    def test_or_in_join_detected(self):
+        findings = analyze_sql("SELECT * FROM orders o JOIN customers c ON o.customer_id = c.customer_id OR o.email = c.email")
+        assert any(f["rule"] == "or_in_join" for f in findings)
+
+    def test_count_distinct_detected(self):
+        findings = analyze_sql("SELECT COUNT(DISTINCT customer_id) FROM orders")
+        assert any(f["rule"] == "count_distinct_many" for f in findings)
+
 
 class TestLineage:
     def test_simple_column(self):

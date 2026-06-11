@@ -190,7 +190,7 @@ def _union_no_all(tree: exp.Select) -> list[dict]:
 def _count_distinct_many(tree: exp.Select) -> list[dict]:
     findings = []
     for agg in tree.find_all(exp.Count):
-        if agg.args.get("distinct"):
+        if isinstance(agg.args.get("this"), exp.Distinct):
             findings.append({
                 "rule": "count_distinct_many", "severity": "info", "line": 0,
                 "message": "COUNT(DISTINCT ...) is expensive on large datasets. Consider approximate methods (APPROX_COUNT_DISTINCT)."
