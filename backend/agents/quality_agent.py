@@ -13,6 +13,8 @@ from scipy import stats as scipy_stats
 import numpy as np
 
 from backend.agents.base import BaseAgent, AgentResult
+from core.pii.detector import scan_pii, PiiFinding
+from core.sql_engine.rules import analyze_sql
 
 
 class QualityAgent(BaseAgent):
@@ -33,7 +35,7 @@ class QualityAgent(BaseAgent):
     @property
     def routing_hints(self) -> list[str]:
         return ["quality", "anomaly", "pii", "outlier", "data quality", "scan", "validate",
-                "integrity", "cleanliness"]
+                "integrity", "cleanliness", "sql", "query", "anti-pattern"]
 
     def _get_conn(self) -> duckdb.DuckDBPyConnection:
         if self._conn is None:
@@ -66,6 +68,10 @@ class QualityAgent(BaseAgent):
         if any(w in q for w in ["outlier", "all", "full", "stat"]):
             out = self._statistical_outliers(conn, detail_parts)
             findings.extend(out)
+
+        if any(w in q for w in ["sql", "query", "anti-pattern", "all", "full"]):
+            sqlq = self._sql_quality_scan(conn, detail_parts)
+            findings.extend(sqlq)
 
         if not detail_parts:
             # Default: run anomaly scan (original behavior)
@@ -156,34 +162,32 @@ class QualityAgent(BaseAgent):
     # ── PII Scan ─────────────────────────────────────────────
 
     def _pii_scan(self, conn, detail_parts) -> list[dict]:
-        """Scan for PII patterns in string columns."""
+        """Scan for PII using the 15-category detector."""
         findings = []
-        PII_PATTERNS = [
-            (r'[\w\.-]+@[\w\.-]+\.\w+', 'email'),
-            (r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', 'phone'),
-            (r'\b(?:\d{4}[-\s]?){3}\d{4}\b', 'credit_card'),
-        ]
-
         for t in ("orders", "customers", "products"):
             df = conn.execute(f"SELECT * FROM {t} LIMIT 1000").fetchdf()
-            for col in df.select_dtypes(include="object").columns:
-                for pattern, pii_type in PII_PATTERNS:
-                    matches = df[col].dropna().str.findall(pattern)
-                    count = sum(len(m) for m in matches)
-                    if count > 0:
-                        findings.append({
-                            "type": "pii", "table": t, "column": col,
-                            "pii_type": pii_type, "matches": count,
-                        })
+            pii_results = scan_pii(df, t)
+            for pii in pii_results:
+                findings.append({
+                    "type": "pii",
+                    "table": pii.table,
+                    "column": pii.column,
+                    "pii_type": pii.category,
+                    "matches": pii.matches,
+                    "severity": pii.severity,
+                    "confidence": pii.confidence,
+                })
 
         if findings:
-            detail_parts.append(
-                "### 🔒 PII Scan\n" +
-                "\n".join(f"  - {f['table']}.{f['column']}: {f['matches']} {f['pii_type']} pattern(s)"
-                          for f in findings)
-            )
+            lines = ["### 🔒 PII Scan (15 categories)"]
+            for f in findings:
+                lines.append(
+                    f"  - {f['severity'].upper()} {f['table']}.{f['column']}: "
+                    f"{f['matches']} {f['pii_type']} ({f['confidence']} confidence)"
+                )
+            detail_parts.append("\n".join(lines))
         else:
-            detail_parts.append("### 🔒 PII Scan\nNo PII patterns detected.")
+            detail_parts.append("### 🔒 PII Scan (15 categories)\nNo PII patterns detected.")
         return findings
 
     # ── Quality Profile ──────────────────────────────────────
@@ -248,3 +252,25 @@ class QualityAgent(BaseAgent):
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    def _sql_quality_scan(self, conn, detail_parts) -> list[dict]:
+        """Scan SQL queries for anti-patterns."""
+        findings = []
+        for table in ("orders", "customers", "products"):
+            try:
+                sql = f"SELECT * FROM {table}"
+                sf = analyze_sql(sql)
+                for f in sf:
+                    f["table"] = table
+                    findings.append(f)
+            except Exception:
+                pass
+
+        if findings:
+            errors = [f for f in findings if f.get("severity") == "error"]
+            warnings = [f for f in findings if f.get("severity") == "warning"]
+            detail_parts.append(
+                f"### 📐 SQL Quality Scan\n"
+                f"- **Errors:** {len(errors)} | **Warnings:** {len(warnings)}\n"
+            )
+        return findings
