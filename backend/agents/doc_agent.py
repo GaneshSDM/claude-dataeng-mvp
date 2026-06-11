@@ -8,6 +8,8 @@ from typing import Any, Optional
 import duckdb
 import pandas as pd
 
+from core.sql_engine.lineage import extract_lineage
+
 from backend.agents.base import BaseAgent, AgentResult
 
 
@@ -88,33 +90,63 @@ class DocumentationAgent(BaseAgent):
         }
 
     def _pipeline_documentation(self, conn) -> dict:
-        """Generate pipeline documentation."""
+        """Generate pipeline documentation with lineage."""
+        # Extract lineage from key SQL patterns
+        lineage_samples = []
+        for sql_pattern, label in [
+            ("SELECT o.order_id, o.customer_id, o.quantity, o.unit_price * o.quantity AS revenue FROM orders o", "orders → revenue calc"),
+            ("SELECT c.customer_id, c.name, c.country, COUNT(o.order_id) AS order_count FROM customers c LEFT JOIN orders o ON c.customer_id = o.customer_id GROUP BY c.customer_id, c.name, c.country", "customers → customer metrics"),
+        ]:
+            try:
+                lineage = extract_lineage(sql_pattern)
+                lineage_samples.append({"label": label, "lineage": lineage})
+            except Exception:
+                pass
+
+        lineage_md = ""
+        if lineage_samples:
+            lineage_md = "\n### Column-Level Lineage\n"
+            for sample in lineage_samples:
+                lineage_md += f"\n**{sample['label']}**\n"
+                for col in sample["lineage"][:6]:
+                    sources = ", ".join(f"{s['table']}.{s['column']}" for s in col.get("sources", []))
+                    lineage_md += f"- `{col['column']}` ← {sources or 'direct'} ({col['transformation_type']})\n"
+
         detail = (
             "## 🔄 Data Pipeline Documentation\n\n"
+            "### Architecture: Medallion (Bronze → Silver → Gold)\n\n"
             "### Source Tables\n"
             "- **orders** — Raw order transactions (78 weeks)\n"
             "- **customers** — Customer master data\n"
             "- **products** — Product catalog with categories\n\n"
-            "### Transformations\n"
-            "1. **Data Cleaning**\n"
-            "   - Filter negative quantities → NULL\n"
-            "   - Parse non-numeric prices → NULL\n"
-            "   - Deduplicate customer records\n\n"
-            "2. **Mart Building**\n"
-            "   - `weekly_sales`: Aggregated weekly revenue, order counts, unique customers\n\n"
+            "### Bronze Layer\n"
+            "- Raw CSV ingestion with schema tracking\n"
+            "- Schema change detection via hash comparison\n\n"
+            "### Silver Layer\n"
+            "- Clean negative quantities → NULL\n"
+            "- Parse non-numeric prices → NULL\n"
+            "- Deduplicate customer records\n"
+            "- Validate product categories\n\n"
+            "### Gold Layer\n"
+            "- `weekly_sales`: Revenue, order counts, unique customers by week\n"
+            "- `customer_metrics`: Lifetime value, order frequency\n"
+            "- `category_performance`: Revenue by product category\n\n"
             "### Quality Checks\n"
-            "- Anomaly detection: 5-layer statistical (pct-change, z-score, IQR, CUSUM, Bayesian)\n"
-            "- PII scanning: email, phone, credit card patterns\n"
+            "- 15-category PII scanning\n"
+            "- 19-rule SQL anti-pattern detection\n"
+            "- 5-layer statistical anomaly detection\n"
             "- Null & duplicate analysis\n\n"
             "### Agents\n"
-            "- **SQL Agent**: Natural language → SQL execution\n"
-            "- **ETL Agent**: Profile, clean, transform\n"
-            "- **Quality Agent**: Anomaly detection, PII, quality checks\n"
-            "- **Analytics Agent**: Reports, charts, KPIs\n"
+            "- **SQL Agent**: Natural language → SQL + anti-pattern validation\n"
+            "- **ETL Agent**: Medallion pipeline (bronze → silver → gold)\n"
+            "- **Quality Agent**: Anomaly detection, 15-category PII, quality checks\n"
+            "- **Analytics Agent**: Reports, charts, KPIs, semantic metrics\n"
+            "- **Documentation Agent**: Data dictionary, lineage, pipeline docs\n"
             "- **Orchestrator**: Coordinates multi-agent workflows\n"
+            f"{lineage_md}"
         )
         return {
-            "summary": "Pipeline docs: source → clean → mart → quality → reports",
+            "summary": "Pipeline docs: bronze → silver → gold with lineage tracking",
             "detail": detail,
         }
 
