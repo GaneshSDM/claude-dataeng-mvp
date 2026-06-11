@@ -11,6 +11,8 @@ import duckdb
 import pandas as pd
 
 from backend.agents.base import BaseAgent, AgentResult
+from core.sql_engine.rules import analyze_sql
+from core.sql_engine.lineage import extract_lineage
 
 
 class SQLAgent(BaseAgent):
@@ -62,6 +64,16 @@ class SQLAgent(BaseAgent):
         # Build a prompt for Claude or a rule-based SQL generator
         # For demo we use a lightweight heuristic + fallback pattern matcher
         sql = self._generate_sql(user_input, schema)
+
+        # Run SQL through anti-pattern engine
+        if sql:
+            sql_findings = analyze_sql(sql)
+            lineage = extract_lineage(sql)
+            if sql_findings:
+                context = context or {}
+                context["sql_findings"] = sql_findings
+                context["lineage"] = lineage
+
         if not sql:
             return AgentResult(
                 agent="sql", status="error",
@@ -79,6 +91,13 @@ class SQLAgent(BaseAgent):
 
             artifacts = []
             detail_parts = [f"**Generated SQL:**\n```sql\n{sql}\n```"]
+
+            if context and context.get("sql_findings"):
+                fp = [f for f in context["sql_findings"] if f["severity"] in ("error", "warning")]
+                if fp:
+                    detail_parts.append("\n**⚠️ SQL Anti-Pattern Analysis:**")
+                    for f in fp[:5]:
+                        detail_parts.append(f"- [{f['severity']}] {f['message']}")
 
             if rows_count > 0:
                 detail_parts.append(f"\n**Results** ({rows_count} rows, showing {min(50, rows_count)}):")
