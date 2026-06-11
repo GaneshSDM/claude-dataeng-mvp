@@ -247,11 +247,9 @@ def _no_filter_on_id(tree: exp.Select) -> list[dict]:
     from_tables = list(tree.find_all(exp.Table))
     if len(from_tables) != 1:
         return []
-    where = tree.find(exp.Where)
-    if where is None:
-        return []
     id_filtered = False
-    for eq in where.find_all(exp.EQ):
+    where = tree.find(exp.Where)
+    for eq in (where.find_all(exp.EQ) if where else []):
         if isinstance(eq.left, exp.Column) and "_id" in eq.left.name.lower():
             id_filtered = True
     if not id_filtered:

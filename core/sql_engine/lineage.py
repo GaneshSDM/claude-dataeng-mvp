@@ -3,9 +3,6 @@
 from __future__ import annotations
 import sqlglot
 from sqlglot import exp
-from collections import defaultdict
-
-
 def extract_lineage(sql: str) -> list[dict]:
     """Extract column-level lineage from a SQL statement.
 
